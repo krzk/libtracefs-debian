@@ -1,0 +1,4 @@
+usr/include/tracefs
+usr/lib/*/libtracefs.a
+usr/lib/*/libtracefs.so
+usr/lib/*/pkgconfig

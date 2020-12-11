@@ -1,0 +1,5 @@
+libtracefs (0.0~git20201211.ca6a929-1) experimental; urgency=medium
+
+  * Initial release (Closes: #976425)
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Fri, 11 Dec 2020 23:15:13 +0000

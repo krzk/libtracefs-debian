@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/architecture.mk
+
+PREFIX=/usr
+build_flags = prefix=$(PREFIX) libdir_relative=lib/$(DEB_HOST_MULTIARCH) pkgconfig_dir=$(PREFIX)/lib/$(DEB_HOST_MULTIARCH)/pkgconfig
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	dh_auto_build -- $(build_flags)
+
+override_dh_auto_install:
+	dh_auto_install -- $(build_flags)
+
+execute_before_dh_auto_test:
+	cp lib/tracefs/* utest/.
