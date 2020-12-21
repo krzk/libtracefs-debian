@@ -1,3 +1,10 @@
+libtracefs (0.0~git20201221.74d7273-1) experimental; urgency=medium
+
+  * New upstream version 0.0~git20201221.74d7273
+    - Update symbols file.
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Mon, 21 Dec 2020 18:38:23 +0000
+
 libtracefs (0.0~git20201211.ca6a929-1) experimental; urgency=medium
 
   * Initial release (Closes: #976425)
