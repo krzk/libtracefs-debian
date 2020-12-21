@@ -28,6 +28,8 @@ endef
 $(call allow-override,CC,$(CROSS_COMPILE)gcc)
 $(call allow-override,AR,$(CROSS_COMPILE)ar)
 $(call allow-override,PKG_CONFIG,pkg-config)
+$(call allow-override,LD_SO_CONF_PATH,/etc/ld.so.conf.d/)
+$(call allow-override,LDCONFIG,ldconfig)
 
 EXT = -std=gnu99
 INSTALL = install
@@ -54,26 +56,22 @@ man_dir = $(prefix)/share/man
 man_dir_SQ = '$(subst ','\'',$(man_dir))'
 libdir = $(prefix)/$(libdir_relative)
 libdir_SQ = '$(subst ','\'',$(libdir))'
-includedir = $(prefix)/include/tracefs
+includedir_relative ?= include/tracefs
+includedir = $(prefix)/$(includedir_relative)
 includedir_SQ = '$(subst ','\'',$(includedir))'
 pkgconfig_dir ?= $(word 1,$(shell $(PKG_CONFIG) 		\
 			--variable pc_path pkg-config | tr ":" " "))
 
-PKG_CONFIG_SOURCE_FILE = libtracefs.pc
-PKG_CONFIG_FILE := $(addprefix $(OUTPUT),$(PKG_CONFIG_SOURCE_FILE))
-
 LIBTRACEEVENT_INCLUDES = $(shell $(PKG_CONFIG) --cflags libtraceevent)
 LIBTRACEEVENT_LIBS = $(shell $(PKG_CONFIG) --libs libtraceevent)
 
-ifeq ("$(LIBTRACEEVENT_INCLUDES)","")
-$(error libtraceevent.so not installed)
+ifneq ($(MAKECMDGOALS),clean)
+ ifeq ("$(LIBTRACEEVENT_INCLUDES)","")
+   $(error libtraceevent.so not installed)
+ endif
 endif
 
-ifeq ($(prefix),/usr/local)
 etcdir ?= /etc
-else
-etcdir ?= $(prefix)/etc
-endif
 etcdir_SQ = '$(subst ','\'',$(etcdir))'
 
 export man_dir man_dir_SQ html_install html_install_SQ INSTALL
@@ -91,8 +89,6 @@ HELP_DIR_SQ = '$(subst ','\'',$(HELP_DIR))'
 #' emacs highlighting gets confused by the above escaped quote.
 
 BASH_COMPLETE_DIR ?= $(etcdir)/bash_completion.d
-LD_SO_CONF_DIR ?= $(etcdir)/ld.so.conf.d
-TRACE_LD_FILE ?= trace.conf
 
 # copy a bit from Linux kbuild
 
@@ -135,9 +131,12 @@ export prefix bindir src obj bdir
 LIBTRACEFS_STATIC = $(bdir)/libtracefs.a
 LIBTRACEFS_SHARED = $(bdir)/libtracefs.so.$(TRACEFS_VERSION)
 
-TRACE_LIBS = $(LIBTRACEEVENT_LIBS)
+PKG_CONFIG_SOURCE_FILE = libtracefs.pc
+PKG_CONFIG_FILE := $(addprefix $(obj)/,$(PKG_CONFIG_SOURCE_FILE))
 
-export LIBS TRACE_LIBS
+LIBS = $(LIBTRACEEVENT_LIBS)
+
+export LIBS
 export LIBTRACEFS_STATIC LIBTRACEFS_SHARED
 
 export Q SILENT VERBOSE EXT
@@ -161,11 +160,8 @@ export CUNIT_INSTALLED
 export CFLAGS
 export INCLUDES
 
-# Required CFLAGS
-override CFLAGS += -D_GNU_SOURCE $(LIBTRACEEVENT_INCLUDES)
-
 # Append required CFLAGS
-override CFLAGS += $(INCLUDES)
+override CFLAGS += -D_GNU_SOURCE $(LIBTRACEEVENT_INCLUDES) $(INCLUDES)
 
 all: all_cmd
 
@@ -197,31 +193,17 @@ define do_make_pkgconfig_file
 	cp -f ${PKG_CONFIG_SOURCE_FILE}.template ${PKG_CONFIG_FILE};	\
 	sed -i "s|INSTALL_PREFIX|${1}|g" ${PKG_CONFIG_FILE}; 		\
 	sed -i "s|LIB_VERSION|${TRACEFS_VERSION}|g" ${PKG_CONFIG_FILE}; \
-	sed -i "s|LIB_DIR|${libdir}|g" ${PKG_CONFIG_FILE}; \
-	sed -i "s|HEADER_DIR|$(includedir)|g" ${PKG_CONFIG_FILE};
+	sed -i "s|LIB_DIR|${libdir_relative}|g" ${PKG_CONFIG_FILE}; \
+	sed -i "s|HEADER_DIR|$(includedir_relative)|g" ${PKG_CONFIG_FILE};
 endef
 
-$(PKG_CONFIG_FILE) : ${PKG_CONFIG_SOURCE_FILE}.template
+BUILD_PREFIX := $(BUILD_OUTPUT)/build_prefix
+
+$(BUILD_PREFIX): force
+	$(Q)$(call build_prefix,$(prefix))
+
+$(PKG_CONFIG_FILE) : ${PKG_CONFIG_SOURCE_FILE}.template $(BUILD_PREFIX)
 	$(Q) $(call do_make_pkgconfig_file,$(prefix))
-
-define do_install_mkdir
-	if [ ! -d '$(DESTDIR_SQ)$1' ]; then		\
-		$(INSTALL) -d -m 755 '$(DESTDIR_SQ)$1';	\
-	fi
-endef
-
-define do_install
-	$(call do_install_mkdir,$2);			\
-	$(INSTALL) $(if $3,-m $3,) $1 '$(DESTDIR_SQ)$2'
-endef
-
-define do_install_pkgconfig_file
-	if [ -n "${pkgconfig_dir}" ]; then 					\
-		$(call do_install,$(PKG_CONFIG_FILE),$(pkgconfig_dir),644); 	\
-	else 									\
-		(echo Failed to locate pkg-config directory) 1>&2;		\
-	fi
-endef
 
 tags:	force
 	$(RM) tags
@@ -235,11 +217,35 @@ cscope: force
 	$(RM) cscope*
 	$(call find_tag_files) | cscope -b -q
 
+ifeq ("$(DESTDIR)", "")
+# If DESTDIR is not defined, then test if after installing the library
+# and running ldconfig, if the library is visible by ld.so.
+# If not, add the path to /etc/ld.so.conf.d/trace.conf and run ldconfig again.
+define install_ld_config
+	$(LDCONFIG); \
+	if ! grep "^$(libdir)$$" $(LD_SO_CONF_PATH)/* &> /dev/null ; then \
+		$(CC) -o $(objtree)/test $(srctree)/test.c -I $(includedir_SQ) \
+			-L $(libdir_SQ) -ltracefs &> /dev/null; \
+		if ! $(objtree)/test &> /dev/null; then \
+			$(call print_install, trace.conf, $(LD_SO_CONF_PATH)) \
+			echo $(libdir_SQ) >> $(LD_SO_CONF_PATH)/trace.conf; \
+			$(LDCONFIG); \
+		fi; \
+		$(RM) $(objtree)/test; \
+	fi
+endef
+else
+# If installing to a location for another machine or package, do not bother
+# with running ldconfig.
+define install_ld_config
+endef
+endif # DESTDIR = ""
+
 install_libs: libs install_pkgconfig
 	$(Q)$(call do_install,$(LIBTRACEFS_SHARED),$(libdir_SQ)); \
 		cp -fpR $(LIB_INSTALL) $(DESTDIR)$(libdir_SQ)
 	$(Q)$(call do_install,$(src)/include/tracefs.h,$(includedir_SQ))
-	$(Q)$(call do_install_ld,$(TRACE_LD_FILE),$(LD_SO_CONF_DIR),$(libdir_SQ))
+	$(Q)$(call install_ld_config)
 
 install: install_libs
 
@@ -249,19 +255,33 @@ install_pkgconfig: $(PKG_CONFIG_FILE)
 
 doc:
 	$(MAKE) -C $(src)/Documentation all
-doc_gui:
-	$(MAKE) -C $(kshark-dir)/Documentation all
-
 
 doc_clean:
 	$(MAKE) -C $(src)/Documentation clean
-doc_gui_clean:
-	$(MAKE) -C $(kshark-dir)/Documentation clean
 
 install_doc:
 	$(MAKE) -C $(src)/Documentation install
-install_doc_gui:
-	$(MAKE) -C $(kshark-dir)/Documentation install
+
+define build_uninstall_script
+	$(Q)mkdir $(BUILD_OUTPUT)/tmp_build
+	$(Q)$(MAKE) -C $(src) DESTDIR=$(BUILD_OUTPUT)/tmp_build/ O=$(BUILD_OUTPUT) $1 > /dev/null
+	$(Q)find $(BUILD_OUTPUT)/tmp_build ! -type d -printf "%P\n" > $(BUILD_OUTPUT)/build_$2
+	$(Q)$(RM) -rf $(BUILD_OUTPUT)/tmp_build
+endef
+
+build_uninstall: $(BUILD_PREFIX)
+	$(call build_uninstall_script,install,uninstall)
+
+$(BUILD_OUTPUT)/build_uninstall: build_uninstall
+
+define uninstall_file
+	if [ -f $(DESTDIR)/$1 -o -h $(DESTDIR)/$1 ]; then \
+		$(call print_uninstall,$(DESTDIR)/$1)$(RM) $(DESTDIR)/$1; \
+	fi;
+endef
+
+uninstall: $(BUILD_OUTPUT)/build_uninstall
+	@$(foreach file,$(shell cat $(BUILD_OUTPUT)/build_uninstall),$(call uninstall_file,$(file)))
 
 PHONY += force
 force:
@@ -284,8 +304,6 @@ all: $(DEFAULT_TARGET)
 
 $(bdir):
 	@mkdir -p $(bdir)
-
-LIBS = -L$(obj)/lib/traceevent -ltraceevent
 
 $(LIBTRACEFS_STATIC): force
 	$(Q)mkdir -p $(bdir)
