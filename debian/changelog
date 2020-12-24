@@ -1,3 +1,9 @@
+libtracefs (0.0~git20201221.74d7273-2) experimental; urgency=medium
+
+  * Build and package libtracefs documentation.
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Thu, 24 Dec 2020 17:16:33 +0000
+
 libtracefs (0.0~git20201221.74d7273-1) experimental; urgency=medium
 
   * New upstream version 0.0~git20201221.74d7273
