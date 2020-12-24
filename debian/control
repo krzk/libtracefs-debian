@@ -1,7 +1,9 @@
 Source: libtracefs
 Priority: optional
 Maintainer: Sudip Mukherjee <sudipm.mukherjee@gmail.com>
-Build-Depends: debhelper-compat (= 13), libcunit1-dev, libtraceevent-dev, pkg-config
+Build-Depends:
+ debhelper-compat (= 13), libcunit1-dev, libtraceevent-dev,
+ pkg-config, asciidoc, xmlto, source-highlight
 Standards-Version: 4.5.1
 Section: libs
 Homepage: https://git.kernel.org/pub/scm/libs/libtrace/libtracefs.git
@@ -12,6 +14,7 @@ Package: libtracefs-dev
 Section: libdevel
 Architecture: any
 Multi-Arch: same
+Suggests: libtracefs-doc
 Depends: libtracefs0 (= ${binary:Version}), ${misc:Depends}
 Description: API to access the kernel tracefs directory (development files)
  The libtracefs library provides APIs to access kernel tracefs file system.
@@ -26,3 +29,12 @@ Description: API to access the kernel tracefs directory (shared library)
  The libtracefs library provides APIs to access kernel tracefs file system.
  .
  This package contains the shared library.
+
+Package: libtracefs-doc
+Section: doc
+Architecture: all
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: API to access the kernel tracefs directory (documentation)
+ The libtracefs library provides APIs to access kernel tracefs file system.
+ .
+ This package contains the documentation of libtracefs.

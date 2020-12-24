@@ -9,10 +9,10 @@ build_flags = prefix=$(PREFIX) libdir_relative=lib/$(DEB_HOST_MULTIARCH) pkgconf
 	dh $@
 
 override_dh_auto_build:
-	dh_auto_build -- $(build_flags)
+	dh_auto_build -- all doc $(build_flags)
 
 override_dh_auto_install:
-	dh_auto_install -- $(build_flags)
+	dh_auto_install -- install_doc $(build_flags)
 
 execute_before_dh_auto_test:
 	cp lib/tracefs/* utest/.
