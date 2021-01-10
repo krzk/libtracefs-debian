@@ -1,4 +1,4 @@
 version=4
-opts="mode=git, pgpmode=none" \
+opts="mode=git" \
  https://git.kernel.org/pub/scm/libs/libtrace/libtracefs.git \
-  HEAD debian uupdate
+   refs/tags/libtracefs-([\d\.]+) debian uupdate
