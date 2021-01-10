@@ -6,6 +6,7 @@ Source: https://git.kernel.org/pub/scm/libs/libtrace/libtracefs.git/
 Files:     *
 Copyright: 2019-2020, VMware, Tzvetomir Stoyanov <tz.stoyanov@gmail.com>
            2008-2010, Red Hat Inc, Steven Rostedt <srostedt@redhat.com>
+           2020, VMware, Inc.
 License:   LGPL-2.1
 
 Files:     scripts/features.mk
