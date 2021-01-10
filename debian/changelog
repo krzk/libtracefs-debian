@@ -1,3 +1,12 @@
+libtracefs (1.0.1-1) experimental; urgency=medium
+
+  * Update watch file.
+  * New upstream version 1.0.1
+    - Rename package for SONAME bump.
+    - Update copyright.
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Sun, 10 Jan 2021 22:33:51 +0000
+
 libtracefs (0.0~git20201221.74d7273-2) experimental; urgency=medium
 
   * Build and package libtracefs documentation.
