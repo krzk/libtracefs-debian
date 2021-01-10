@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1
 # libtracefs version
-TFS_VERSION = 0
-TFS_PATCHLEVEL = 1
-TFS_EXTRAVERSION = 0
+TFS_VERSION = 1
+TFS_PATCHLEVEL = 0
+TFS_EXTRAVERSION = 1
 TRACEFS_VERSION = $(TFS_VERSION).$(TFS_PATCHLEVEL).$(TFS_EXTRAVERSION)
 
 export TFS_VERSION
@@ -244,7 +244,7 @@ endif # DESTDIR = ""
 install_libs: libs install_pkgconfig
 	$(Q)$(call do_install,$(LIBTRACEFS_SHARED),$(libdir_SQ)); \
 		cp -fpR $(LIB_INSTALL) $(DESTDIR)$(libdir_SQ)
-	$(Q)$(call do_install,$(src)/include/tracefs.h,$(includedir_SQ))
+	$(Q)$(call do_install,$(src)/include/tracefs.h,$(includedir_SQ),644)
 	$(Q)$(call install_ld_config)
 
 install: install_libs
