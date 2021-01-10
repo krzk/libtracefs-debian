@@ -15,13 +15,13 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Suggests: libtracefs-doc
-Depends: libtracefs0 (= ${binary:Version}), ${misc:Depends}
+Depends: libtracefs1 (= ${binary:Version}), ${misc:Depends}
 Description: API to access the kernel tracefs directory (development files)
  The libtracefs library provides APIs to access kernel tracefs file system.
  .
- This package is needed to compile programs against libtracefs0.
+ This package is needed to compile programs against libtracefs1.
 
-Package: libtracefs0
+Package: libtracefs1
 Architecture: any
 Multi-Arch: same
 Depends: ${shlibs:Depends}, ${misc:Depends}

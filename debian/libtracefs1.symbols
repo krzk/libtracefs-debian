@@ -1,4 +1,4 @@
-libtracefs.so.0.1.0 libtracefs0 #MINVER#
+libtracefs.so.1 libtracefs1 #MINVER#
  tracefs_dir_exists@Base 0.0~git20201211.ca6a929
  tracefs_event_systems@Base 0.0~git20201211.ca6a929
  tracefs_file_exists@Base 0.0~git20201211.ca6a929
