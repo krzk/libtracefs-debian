@@ -2,8 +2,12 @@
 
 include /usr/share/dpkg/architecture.mk
 
+ifeq (,$(findstring terse,$(DEB_BUILD_OPTIONS)))
+        VERBOSE=1
+endif
+
 PREFIX=/usr
-build_flags = prefix=$(PREFIX) libdir_relative=lib/$(DEB_HOST_MULTIARCH) pkgconfig_dir=$(PREFIX)/lib/$(DEB_HOST_MULTIARCH)/pkgconfig
+build_flags = prefix=$(PREFIX) libdir_relative=lib/$(DEB_HOST_MULTIARCH) pkgconfig_dir=$(PREFIX)/lib/$(DEB_HOST_MULTIARCH)/pkgconfig V=$(VERBOSE)
 
 %:
 	dh $@
