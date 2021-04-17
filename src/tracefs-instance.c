@@ -14,36 +14,68 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
-#include <linux/limits.h>
+#include <limits.h>
+#include <pthread.h>
 #include "tracefs.h"
 #include "tracefs-local.h"
 
 #define FLAG_INSTANCE_NEWLY_CREATED	(1 << 0)
-struct tracefs_instance {
-	char	*name;
-	int	flags;
-};
+
+struct tracefs_options_mask	toplevel_supported_opts;
+struct tracefs_options_mask	toplevel_enabled_opts;
+
+__hidden inline struct tracefs_options_mask *
+supported_opts_mask(struct tracefs_instance *instance)
+{
+	return instance ? &instance->supported_opts : &toplevel_supported_opts;
+}
+
+__hidden inline struct tracefs_options_mask *
+enabled_opts_mask(struct tracefs_instance *instance)
+{
+	return instance ? &instance->enabled_opts : &toplevel_enabled_opts;
+}
 
 /**
  * instance_alloc - allocate a new ftrace instance
+ * @trace_dir - Full path to the tracing directory, where the instance is
  * @name: The name of the instance (instance will point to this)
  *
  * Returns a newly allocated instance, or NULL in case of an error.
  */
-static struct tracefs_instance *instance_alloc(const char *name)
+static struct tracefs_instance *instance_alloc(const char *trace_dir, const char *name)
 {
 	struct tracefs_instance *instance;
 
 	instance = calloc(1, sizeof(*instance));
-	if (instance && name) {
+	if (!instance)
+		goto error;
+	instance->trace_dir = strdup(trace_dir);
+	if (!instance->trace_dir)
+		goto error;
+	if (name) {
 		instance->name = strdup(name);
-		if (!instance->name) {
-			free(instance);
-			instance = NULL;
-		}
+		if (!instance->name)
+			goto error;
 	}
 
+	if (pthread_mutex_init(&instance->lock, NULL) < 0)
+		goto error;
+
+	instance->ftrace_filter_fd = -1;
+	instance->ftrace_notrace_fd = -1;
+	instance->ftrace_marker_fd = -1;
+	instance->ftrace_marker_raw_fd = -1;
+
 	return instance;
+
+error:
+	if (instance) {
+		free(instance->name);
+		free(instance->trace_dir);
+		free(instance);
+	}
+	return NULL;
 }
 
 /**
@@ -56,7 +88,22 @@ void tracefs_instance_free(struct tracefs_instance *instance)
 {
 	if (!instance)
 		return;
+
+	if (instance->ftrace_filter_fd >= 0)
+		close(instance->ftrace_filter_fd);
+
+	if (instance->ftrace_notrace_fd >= 0)
+		close(instance->ftrace_notrace_fd);
+
+	if (instance->ftrace_marker_fd >= 0)
+		close(instance->ftrace_marker_fd);
+
+	if (instance->ftrace_marker_raw_fd >= 0)
+		close(instance->ftrace_marker_raw_fd);
+
+	free(instance->trace_dir);
 	free(instance->name);
+	pthread_mutex_destroy(&instance->lock);
 	free(instance);
 }
 
@@ -105,12 +152,16 @@ bool tracefs_instance_is_new(struct tracefs_instance *instance)
 struct tracefs_instance *tracefs_instance_create(const char *name)
 {
 	struct tracefs_instance *inst = NULL;
+	char *path = NULL;
+	const char *tdir;
 	struct stat st;
 	mode_t mode;
-	char *path;
 	int ret;
 
-	inst = instance_alloc(name);
+	tdir = tracefs_tracing_dir();
+	if (!tdir)
+		return NULL;
+	inst = instance_alloc(tdir, name);
 	if (!inst)
 		return NULL;
 
@@ -134,6 +185,49 @@ error:
 }
 
 /**
+ * tracefs_instance_alloc - Allocate an instance structure for existing trace instance
+ * @tracing_dir: full path to the system trace directory, where the new instance is
+ *		 if NULL, the default top tracing directory is used.
+ * @name: Name of the instance.
+ *
+ * Allocates and initializes a new instance structure. If the instance does not
+ * exist, do not create it and exit with error.
+ * Returns a pointer to a newly allocated instance, or NULL in case of an error
+ * or the requested instance does not exists.
+ * The returned instance must be freed by tracefs_instance_free().
+ */
+struct tracefs_instance *tracefs_instance_alloc(const char *tracing_dir,
+						const char *name)
+{
+	struct tracefs_instance *inst = NULL;
+	char file[PATH_MAX];
+	const char *tdir;
+	struct stat st;
+	int ret;
+
+	if (tracing_dir) {
+		ret = stat(tracing_dir, &st);
+		if (ret < 0 || !S_ISDIR(st.st_mode))
+			return NULL;
+		tdir = tracing_dir;
+
+	} else
+		tdir = tracefs_tracing_dir();
+	if (!tdir)
+		return NULL;
+
+	if (name) {
+		sprintf(file, "%s/instances/%s", tdir, name);
+		ret = stat(file, &st);
+		if (ret < 0 || !S_ISDIR(st.st_mode))
+			return NULL;
+	}
+	inst = instance_alloc(tdir, name);
+
+	return inst;
+}
+
+/**
  * tracefs_instance_destroy - Remove a ftrace instance
  * @instance: Pointer to the instance to be removed
  *
@@ -145,7 +239,7 @@ int tracefs_instance_destroy(struct tracefs_instance *instance)
 	int ret = -1;
 
 	if (!instance || !instance->name) {
-		warning("Cannot remove top instance");
+		tracefs_warning("Cannot remove top instance");
 		return -1;
 	}
 
@@ -170,18 +264,18 @@ int tracefs_instance_destroy(struct tracefs_instance *instance)
 char *
 tracefs_instance_get_file(struct tracefs_instance *instance, const char *file)
 {
-	char *path;
-	char *buf;
+	char *path = NULL;
 	int ret;
 
-	if (instance && instance->name) {
-		ret = asprintf(&buf, "instances/%s/%s", instance->name, file);
-		if (ret < 0)
-			return NULL;
-		path = tracefs_get_tracing_file(buf);
-		free(buf);
-	} else
-		path = tracefs_get_tracing_file(file);
+	if (!instance)
+		return tracefs_get_tracing_file(file);
+	if (!instance->name)
+		ret = asprintf(&path, "%s/%s", instance->trace_dir, file);
+	else
+		ret = asprintf(&path, "%s/instances/%s/%s",
+			       instance->trace_dir, instance->name, file);
+	if (ret < 0)
+		return NULL;
 
 	return path;
 }
@@ -196,21 +290,21 @@ tracefs_instance_get_file(struct tracefs_instance *instance, const char *file)
  */
 char *tracefs_instance_get_dir(struct tracefs_instance *instance)
 {
-	char *buf;
-	char *path;
+	char *path = NULL;
 	int ret;
 
-	if (instance && instance->name) {
-		ret = asprintf(&buf, "instances/%s", instance->name);
-		if (ret < 0) {
-			warning("Failed to allocate path for instance %s",
-				 instance->name);
-			return NULL;
-		}
-		path = tracefs_get_tracing_file(buf);
-		free(buf);
-	} else
-		path = trace_find_tracing_dir();
+	if (!instance) /* Top instance of default system trace directory */
+		return trace_find_tracing_dir();
+
+	if (!instance->name)
+		return strdup(instance->trace_dir);
+
+	ret = asprintf(&path, "%s/instances/%s", instance->trace_dir, instance->name);
+	if (ret < 0) {
+		tracefs_warning("Failed to allocate path for instance %s",
+				instance->name);
+		return NULL;
+	}
 
 	return path;
 }
@@ -229,6 +323,20 @@ const char *tracefs_instance_get_name(struct tracefs_instance *instance)
 	return NULL;
 }
 
+/**
+ * tracefs_instance_get_trace_dir - return the top trace directory, where the instance is confuigred
+ * @instance: ftrace instance
+ *
+ * Returns the top trace directory where the given @instance is configured.
+ * The returned string must *not* be freed.
+ */
+const char *tracefs_instance_get_trace_dir(struct tracefs_instance *instance)
+{
+	if (instance)
+		return instance->trace_dir;
+	return NULL;
+}
+
 static int write_file(const char *file, const char *str)
 {
 	int ret;
@@ -236,7 +344,7 @@ static int write_file(const char *file, const char *str)
 
 	fd = open(file, O_WRONLY | O_TRUNC);
 	if (fd < 0) {
-		warning("Failed to open '%s'", file);
+		tracefs_warning("Failed to open '%s'", file);
 		return -1;
 	}
 	ret = write(fd, str, strlen(str));
@@ -292,7 +400,7 @@ char *tracefs_instance_file_read(struct tracefs_instance *instance,
 	if (!path)
 		return NULL;
 
-	size = str_read_file(path, &buf);
+	size = str_read_file(path, &buf, true);
 
 	tracefs_put_tracing_file(path);
 	if (buf && psize)
@@ -301,8 +409,67 @@ char *tracefs_instance_file_read(struct tracefs_instance *instance,
 	return buf;
 }
 
+/**
+ * tracefs_instance_file_read_number - Read long long integer from a trace file.
+ * @instance: ftrace instance, can be NULL for the top instance
+ * @file: name of the file
+ * @res: The integer from the file.
+ *
+ * Returns 0 if the reading is successful and the result is stored in res, -1
+ * in case of an error.
+ */
+int tracefs_instance_file_read_number(struct tracefs_instance *instance,
+				      const char *file, long long *res)
+{
+	long long num;
+	int ret = -1;
+	int size = 0;
+	char *endptr;
+	char *str;
+
+	str = tracefs_instance_file_read(instance, file, &size);
+	if (size && str) {
+		errno = 0;
+		num = strtoll(str, &endptr, 0);
+		if (errno == 0 && str != endptr) {
+			*res = num;
+			ret = 0;
+		}
+	}
+	free(str);
+	return ret;
+}
+
+/**
+ * tracefs_instance_file_open - Open a trace file for reading and writing
+ * @instance: ftrace instance, can be NULL for the top instance
+ * @file: name of the file
+ * @mode: file open flags, -1 for default O_RDWR
+ *
+ * Returns -1 in case of an error, or a valid file descriptor otherwise.
+ * The returned FD must be closed with close()
+ */
+int tracefs_instance_file_open(struct tracefs_instance *instance,
+			       const char *file, int mode)
+{
+	int flags = O_RDWR;
+	int fd = -1;
+	char *path;
+
+	path = tracefs_instance_get_file(instance, file);
+	if (!path)
+		return -1;
+
+	if (mode >= 0)
+		flags = mode;
+	fd = open(path, flags);
+	tracefs_put_tracing_file(path);
+
+	return fd;
+}
+
 static bool check_file_exists(struct tracefs_instance *instance,
-			     char *name, bool dir)
+			      const char *name, bool dir)
 {
 	char file[PATH_MAX];
 	struct stat st;
@@ -348,7 +515,7 @@ bool tracefs_instance_exists(const char *name)
  *
  * If a directory with the given name exists, false is returned.
  */
-bool tracefs_file_exists(struct tracefs_instance *instance, char *name)
+bool tracefs_file_exists(struct tracefs_instance *instance, const char *name)
 {
 	return check_file_exists(instance, name, false);
 }
@@ -360,7 +527,7 @@ bool tracefs_file_exists(struct tracefs_instance *instance, char *name)
  *
  * Returns true if the directory exists, false otherwise
  */
-bool tracefs_dir_exists(struct tracefs_instance *instance, char *name)
+bool tracefs_dir_exists(struct tracefs_instance *instance, const char *name)
 {
 	return check_file_exists(instance, name, true);
 }
