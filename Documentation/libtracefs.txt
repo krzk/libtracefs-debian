@@ -25,8 +25,10 @@ Trace instances:
 	bool *tracefs_dir_exists*(struct tracefs_instance pass:[*]_instance_, char pass:[*]_name_);
 	char pass:[*]*tracefs_instance_get_file*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_file_);
 	char pass:[*]*tracefs_instance_get_dir*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_instance_file_open*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_file_, int _mode_);
 	int *tracefs_instance_file_write*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_file_, const char pass:[*]_str_);
 	char pass:[*]*tracefs_instance_file_read*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_file_, int pass:[*]_psize_);
+	int *tracefs_instance_file_read_number*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_file_, long long int pass:[*]_res_);
 	const char pass:[*]*tracefs_instance_get_name*(struct tracefs_instance pass:[*]_instance_);
 	int *tracefs_instances_walk*(int (pass:[*]_callback_)(const char pass:[*], void pass:[*]), void pass:[*]_context)_;
 	bool *tracefs_instance_exists*(const char pass:[*]_name_);
@@ -43,6 +45,22 @@ Trace helper functions:
 	void *tracefs_list_free*(char pass:[*]pass:[*]_list_);
 	char pass:[*]pass:[*]*tracefs_tracers*(const char pass:[*]_tracing_dir_);
 	char pass:[*]*tracefs_get_clock*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_trace_is_on*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_trace_on*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_trace_off*(struct tracefs_instance pass:[*]_instance_);
+	int _tracefs_trace_on_get_fd_(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_trace_on_fd*(int _fd_);
+	int *tracefs_trace_off_fd*(int _fd_);
+
+Writing data in the trace buffer:
+	int *tracefs_print_init*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_printf*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_fmt_, _..._);
+	int *tracefs_vprintf*(struct tracefs_instance pass:[*]_instance_, const char pass:[*]_fmt_, va_list _ap_);
+	void *tracefs_print_close*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_binary_init*(struct tracefs_instance pass:[*]_instance_);
+	int *tracefs_binary_write*(struct tracefs_instance pass:[*]_instance_, void pass:[*]_data_, int _len_);
+	void *tracefs_binary_close*(struct tracefs_instance pass:[*]_instance_);
+
 --
 
 DESCRIPTION

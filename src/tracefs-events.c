@@ -20,96 +20,189 @@
 #include "tracefs.h"
 #include "tracefs-local.h"
 
-static struct kbuffer *
-page_to_kbuf(struct tep_handle *tep, void *page, int size)
-{
-	enum kbuffer_long_size long_size;
-	enum kbuffer_endian endian;
+struct cpu_iterate {
+	struct tep_record record;
+	struct tep_event *event;
 	struct kbuffer *kbuf;
+	void *page;
+	int psize;
+	int rsize;
+	int cpu;
+	int fd;
+};
 
-	if (tep_is_file_bigendian(tep))
-		endian = KBUFFER_ENDIAN_BIG;
-	else
-		endian = KBUFFER_ENDIAN_LITTLE;
-
-	if (tep_get_header_page_size(tep) == 8)
-		long_size = KBUFFER_LSIZE_8;
-	else
-		long_size = KBUFFER_LSIZE_4;
-
-	kbuf = kbuffer_alloc(long_size, endian);
-	if (!kbuf)
-		return NULL;
-
-	kbuffer_load_subbuffer(kbuf, page);
-	if (kbuffer_subbuffer_size(kbuf) > size) {
-		warning("%s: page_size > size", __func__);
-		kbuffer_free(kbuf);
-		kbuf = NULL;
-	}
-
-	return kbuf;
-}
-
-static int read_kbuf_record(struct kbuffer *kbuf, struct tep_record *record)
+static int read_kbuf_record(struct cpu_iterate *cpu)
 {
 	unsigned long long ts;
 	void *ptr;
 
-	ptr = kbuffer_read_event(kbuf, &ts);
-	if (!ptr || !record)
+	if (!cpu || !cpu->kbuf)
+		return -1;
+	ptr = kbuffer_read_event(cpu->kbuf, &ts);
+	if (!ptr)
 		return -1;
 
-	memset(record, 0, sizeof(*record));
-	record->ts = ts;
-	record->size = kbuffer_event_size(kbuf);
-	record->record_size = kbuffer_curr_size(kbuf);
-	record->cpu = 0;
-	record->data = ptr;
-	record->ref_count = 1;
+	memset(&cpu->record, 0, sizeof(cpu->record));
+	cpu->record.ts = ts;
+	cpu->record.size = kbuffer_event_size(cpu->kbuf);
+	cpu->record.record_size = kbuffer_curr_size(cpu->kbuf);
+	cpu->record.cpu = cpu->cpu;
+	cpu->record.data = ptr;
+	cpu->record.ref_count = 1;
 
-	kbuffer_next_event(kbuf, NULL);
+	kbuffer_next_event(cpu->kbuf, NULL);
 
 	return 0;
 }
 
-static int
-get_events_in_page(struct tep_handle *tep, void *page,
-		   int size, int cpu,
-		   int (*callback)(struct tep_event *,
-				   struct tep_record *,
-				   int, void *),
-		   void *callback_context)
+int read_next_page(struct tep_handle *tep, struct cpu_iterate *cpu)
 {
-	struct tep_record record;
-	struct tep_event *event;
-	struct kbuffer *kbuf;
-	int id, cnt = 0;
-	int ret;
+	enum kbuffer_long_size long_size;
+	enum kbuffer_endian endian;
 
-	if (size <= 0)
-		return 0;
+	cpu->rsize = read(cpu->fd, cpu->page, cpu->psize);
+	if (cpu->rsize <= 0)
+		return -1;
 
-	kbuf = page_to_kbuf(tep, page, size);
-	if (!kbuf)
-		return 0;
+	if (!cpu->kbuf) {
+		if (tep_is_file_bigendian(tep))
+			endian = KBUFFER_ENDIAN_BIG;
+		else
+			endian = KBUFFER_ENDIAN_LITTLE;
 
-	ret = read_kbuf_record(kbuf, &record);
-	while (!ret) {
-		id = tep_data_type(tep, &record);
-		event = tep_find_event(tep, id);
-		if (event) {
-			cnt++;
-			if (callback &&
-			    callback(event, &record, cpu, callback_context))
-				break;
-		}
-		ret = read_kbuf_record(kbuf, &record);
+		if (tep_get_header_page_size(tep) == 8)
+			long_size = KBUFFER_LSIZE_8;
+		else
+			long_size = KBUFFER_LSIZE_4;
+
+		cpu->kbuf = kbuffer_alloc(long_size, endian);
+		if (!cpu->kbuf)
+			return -1;
 	}
 
-	kbuffer_free(kbuf);
+	kbuffer_load_subbuffer(cpu->kbuf, cpu->page);
+	if (kbuffer_subbuffer_size(cpu->kbuf) > cpu->rsize) {
+		tracefs_warning("%s: page_size > %d", __func__, cpu->rsize);
+		return -1;
+	}
 
-	return cnt;
+	return 0;
+}
+
+int read_next_record(struct tep_handle *tep, struct cpu_iterate *cpu)
+{
+	int id;
+
+	do {
+		while (!read_kbuf_record(cpu)) {
+			id = tep_data_type(tep, &(cpu->record));
+			cpu->event = tep_find_event(tep, id);
+			if (cpu->event)
+				return 0;
+		}
+	} while (!read_next_page(tep, cpu));
+
+	return -1;
+}
+
+static int read_cpu_pages(struct tep_handle *tep, struct cpu_iterate *cpus, int count,
+			  int (*callback)(struct tep_event *,
+					  struct tep_record *,
+					  int, void *),
+			  void *callback_context)
+{
+	bool has_data = false;
+	int ret;
+	int i, j;
+
+	for (i = 0; i < count; i++) {
+		ret = read_next_record(tep, cpus + i);
+		if (!ret)
+			has_data = true;
+	}
+
+	while (has_data) {
+		j = count;
+		for (i = 0; i < count; i++) {
+			if (!cpus[i].event)
+				continue;
+			if (j == count || cpus[j].record.ts > cpus[i].record.ts)
+				j = i;
+		}
+		if (j < count) {
+			if (callback(cpus[j].event, &cpus[j].record, cpus[j].cpu, callback_context))
+				break;
+			cpus[j].event = NULL;
+			read_next_record(tep, cpus + j);
+		} else {
+			has_data = false;
+		}
+	}
+
+	return 0;
+}
+
+static int open_cpu_files(struct tracefs_instance *instance, cpu_set_t *cpus,
+			  int cpu_size, struct cpu_iterate **all_cpus, int *count)
+{
+	struct cpu_iterate *tmp;
+	unsigned int p_size;
+	struct dirent *dent;
+	char file[PATH_MAX];
+	struct stat st;
+	int ret = -1;
+	int fd = -1;
+	char *path;
+	DIR *dir;
+	int cpu;
+	int i = 0;
+
+	path = tracefs_instance_get_file(instance, "per_cpu");
+	if (!path)
+		return -1;
+	dir = opendir(path);
+	if (!dir)
+		goto out;
+	p_size = getpagesize();
+	while ((dent = readdir(dir))) {
+		const char *name = dent->d_name;
+
+		if (strlen(name) < 4 || strncmp(name, "cpu", 3) != 0)
+			continue;
+		cpu = atoi(name + 3);
+		if (cpus && !CPU_ISSET_S(cpu, cpu_size, cpus))
+			continue;
+		sprintf(file, "%s/%s", path, name);
+		if (stat(file, &st) < 0 || !S_ISDIR(st.st_mode))
+			continue;
+
+		sprintf(file, "%s/%s/trace_pipe_raw", path, name);
+		fd = open(file, O_RDONLY | O_NONBLOCK);
+		if (fd < 0)
+			continue;
+		tmp = realloc(*all_cpus, (i + 1) * sizeof(struct cpu_iterate));
+		if (!tmp) {
+			close(fd);
+			goto out;
+		}
+		memset(tmp + i, 0, sizeof(struct cpu_iterate));
+		tmp[i].fd = fd;
+		tmp[i].cpu = cpu;
+		tmp[i].page =  malloc(p_size);
+		tmp[i].psize = p_size;
+		*all_cpus = tmp;
+		*count = i + 1;
+		if (!tmp[i++].page)
+			goto out;
+	}
+
+	ret = 0;
+
+out:
+	if (dir)
+		closedir(dir);
+	tracefs_put_tracing_file(path);
+	return ret;
 }
 
 /*
@@ -125,6 +218,7 @@ get_events_in_page(struct tep_handle *tep, void *page,
  *
  * If the @callback returns non-zero, the iteration stops - in that case all
  * records from the current page will be lost from future reads
+ * The events are iterated in sorted order, oldest first.
  *
  * Returns -1 in case of an error, or 0 otherwise
  */
@@ -136,67 +230,29 @@ int tracefs_iterate_raw_events(struct tep_handle *tep,
 						int, void *),
 				void *callback_context)
 {
-	unsigned int p_size;
-	struct dirent *dent;
-	char file[PATH_MAX];
-	void *page = NULL;
-	struct stat st;
-	char *path;
-	DIR *dir;
+	struct cpu_iterate *all_cpus = NULL;
+	int count = 0;
 	int ret;
-	int cpu;
-	int fd;
-	int r;
+	int i;
 
 	if (!tep || !callback)
 		return -1;
 
-	p_size = getpagesize();
-	path = tracefs_instance_get_file(instance, "per_cpu");
-	if (!path)
-		return -1;
-	dir = opendir(path);
-	if (!dir) {
-		ret = -1;
-		goto error;
-	}
-	page = malloc(p_size);
-	if (!page) {
-		ret = -1;
-		goto error;
-	}
-	while ((dent = readdir(dir))) {
-		const char *name = dent->d_name;
+	ret = open_cpu_files(instance, cpus, cpu_size, &all_cpus, &count);
+	if (ret < 0)
+		goto out;
+	ret = read_cpu_pages(tep, all_cpus, count, callback, callback_context);
 
-		if (strlen(name) < 4 || strncmp(name, "cpu", 3) != 0)
-			continue;
-		cpu = atoi(name + 3);
-		if (cpus && !CPU_ISSET_S(cpu, cpu_size, cpus))
-			continue;
-		sprintf(file, "%s/%s", path, name);
-		ret = stat(file, &st);
-		if (ret < 0 || !S_ISDIR(st.st_mode))
-			continue;
-
-		sprintf(file, "%s/%s/trace_pipe_raw", path, name);
-		fd = open(file, O_RDONLY | O_NONBLOCK);
-		if (fd < 0)
-			continue;
-		do {
-			r = read(fd, page, p_size);
-			if (r > 0)
-				get_events_in_page(tep, page, r, cpu,
-						   callback, callback_context);
-		} while (r > 0);
-		close(fd);
+out:
+	if (all_cpus) {
+		for (i = 0; i < count; i++) {
+			kbuffer_free(all_cpus[i].kbuf);
+			close(all_cpus[i].fd);
+			free(all_cpus[i].page);
+		}
+		free(all_cpus);
 	}
-	ret = 0;
 
-error:
-	if (dir)
-		closedir(dir);
-	free(page);
-	tracefs_put_tracing_file(path);
 	return ret;
 }
 
@@ -420,7 +476,7 @@ char **tracefs_tracers(const char *tracing_dir)
 	if (ret < 0)
 		goto out_free;
 
-	len = str_read_file(available_tracers, &buf);
+	len = str_read_file(available_tracers, &buf, true);
 	if (len <= 0)
 		goto out_free;
 
@@ -480,7 +536,7 @@ static int load_events(struct tep_handle *tep,
 		if (ret < 0)
 			goto next_event;
 
-		len = str_read_file(format, &buf);
+		len = str_read_file(format, &buf, true);
 		if (len <= 0)
 			goto next_event;
 
@@ -510,7 +566,7 @@ static int read_header(struct tep_handle *tep, const char *tracing_dir)
 	if (ret < 0)
 		goto out;
 
-	len = str_read_file(header, &buf);
+	len = str_read_file(header, &buf, true);
 	if (len <= 0)
 		goto out;
 
@@ -532,6 +588,92 @@ static bool contains(const char *name, const char * const *names)
 		if (strcmp(name, *names) == 0)
 			return true;
 	return false;
+}
+
+static void load_kallsyms(struct tep_handle *tep)
+{
+	char *buf;
+
+	if (str_read_file("/proc/kallsyms", &buf, false) <= 0)
+		return;
+
+	tep_parse_kallsyms(tep, buf);
+	free(buf);
+}
+
+static int load_saved_cmdlines(const char *tracing_dir,
+			       struct tep_handle *tep, bool warn)
+{
+	char *path;
+	char *buf;
+	int ret;
+
+	path = trace_append_file(tracing_dir, "saved_cmdlines");
+	if (!path)
+		return -1;
+
+	ret = str_read_file(path, &buf, false);
+	free(path);
+	if (ret <= 0)
+		return -1;
+
+	ret = tep_parse_saved_cmdlines(tep, buf);
+	free(buf);
+
+	return ret;
+}
+
+static void load_printk_formats(const char *tracing_dir,
+				struct tep_handle *tep)
+{
+	char *path;
+	char *buf;
+	int ret;
+
+	path = trace_append_file(tracing_dir, "printk_formats");
+	if (!path)
+		return;
+
+	ret = str_read_file(path, &buf, false);
+	free(path);
+	if (ret <= 0)
+		return;
+
+	tep_parse_printk_formats(tep, buf);
+	free(buf);
+}
+
+/*
+ * Do a best effort attempt to load kallsyms, saved_cmdlines and
+ * printk_formats. If they can not be loaded, then this will not
+ * do the mappings. But this does not fail the loading of events.
+ */
+static void load_mappings(const char *tracing_dir,
+			  struct tep_handle *tep)
+{
+	load_kallsyms(tep);
+
+	/* If there's no tracing_dir no reason to go further */
+	if (!tracing_dir)
+		tracing_dir = tracefs_tracing_dir();
+
+	if (!tracing_dir)
+		return;
+
+	load_saved_cmdlines(tracing_dir, tep, false);
+	load_printk_formats(tracing_dir, tep);
+}
+
+int tracefs_load_cmdlines(const char *tracing_dir, struct tep_handle *tep)
+{
+
+	if (!tracing_dir)
+		tracing_dir = tracefs_tracing_dir();
+
+	if (!tracing_dir)
+		return -1;
+
+	return load_saved_cmdlines(tracing_dir, tep, true);
 }
 
 static int fill_local_events_system(const char *tracing_dir,
@@ -572,6 +714,8 @@ static int fill_local_events_system(const char *tracing_dir,
 	/* Include ftrace, as it is excluded for not having "enable" file */
 	if (!sys_names || contains("ftrace", sys_names))
 		load_events(tep, tracing_dir, "ftrace");
+
+	load_mappings(tracing_dir, tep);
 
 	/* always succeed because parsing failures are not critical */
 	ret = 0;
