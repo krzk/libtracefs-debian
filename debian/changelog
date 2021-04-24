@@ -1,3 +1,9 @@
+libtracefs (1.1.1-2) experimental; urgency=medium
+
+  * Add version dependency on libtraceevent.
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Sat, 24 Apr 2021 15:16:01 +0100
+
 libtracefs (1.1.1-1) experimental; urgency=medium
 
   * New upstream version 1.1.1
