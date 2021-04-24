@@ -1,27 +1,60 @@
 libtracefs.so.1 libtracefs1 #MINVER#
+ read_next_page@Base 1.1.1
+ read_next_record@Base 1.1.1
+ toplevel_enabled_opts@Base 1.1.1
+ toplevel_supported_opts@Base 1.1.1
+ tracefs_binary_close@Base 1.1.1
+ tracefs_binary_init@Base 1.1.1
+ tracefs_binary_write@Base 1.1.1
  tracefs_dir_exists@Base 0.0~git20201211.ca6a929
  tracefs_event_systems@Base 0.0~git20201211.ca6a929
  tracefs_file_exists@Base 0.0~git20201211.ca6a929
  tracefs_fill_local_events@Base 0.0~git20201211.ca6a929
+ tracefs_function_filter@Base 1.1.1
+ tracefs_function_notrace@Base 1.1.1
  tracefs_get_clock@Base 0.0~git20201211.ca6a929
  tracefs_get_tracing_file@Base 0.0~git20201211.ca6a929
+ tracefs_instance_alloc@Base 1.1.1
  tracefs_instance_create@Base 0.0~git20201211.ca6a929
  tracefs_instance_destroy@Base 0.0~git20201211.ca6a929
  tracefs_instance_exists@Base 0.0~git20201211.ca6a929
+ tracefs_instance_file_open@Base 1.1.1
  tracefs_instance_file_read@Base 0.0~git20201211.ca6a929
+ tracefs_instance_file_read_number@Base 1.1.1
  tracefs_instance_file_write@Base 0.0~git20201211.ca6a929
  tracefs_instance_free@Base 0.0~git20201211.ca6a929
  tracefs_instance_get_dir@Base 0.0~git20201211.ca6a929
  tracefs_instance_get_file@Base 0.0~git20201211.ca6a929
  tracefs_instance_get_name@Base 0.0~git20201211.ca6a929
+ tracefs_instance_get_trace_dir@Base 1.1.1
  tracefs_instance_is_new@Base 0.0~git20201211.ca6a929
  tracefs_instances_walk@Base 0.0~git20201211.ca6a929
  tracefs_iterate_raw_events@Base 0.0~git20201211.ca6a929
  tracefs_list_free@Base 0.0~git20201211.ca6a929
+ tracefs_load_cmdlines@Base 1.1.1
  tracefs_local_events@Base 0.0~git20201211.ca6a929
  tracefs_local_events_system@Base 0.0~git20201211.ca6a929
+ tracefs_option_diasble@Base 1.1.1
+ tracefs_option_enable@Base 1.1.1
+ tracefs_option_id@Base 1.1.1
+ tracefs_option_is_enabled@Base 1.1.1
+ tracefs_option_is_supported@Base 1.1.1
+ tracefs_option_mask_is_set@Base 1.1.1
+ tracefs_option_name@Base 1.1.1
+ tracefs_options_get_enabled@Base 1.1.1
+ tracefs_options_get_supported@Base 1.1.1
+ tracefs_print_close@Base 1.1.1
+ tracefs_print_init@Base 1.1.1
+ tracefs_printf@Base 1.1.1
  tracefs_put_tracing_file@Base 0.0~git20201211.ca6a929
  tracefs_system_events@Base 0.0~git20201211.ca6a929
+ tracefs_trace_is_on@Base 1.1.1
+ tracefs_trace_off@Base 1.1.1
+ tracefs_trace_off_fd@Base 1.1.1
+ tracefs_trace_on@Base 1.1.1
+ tracefs_trace_on_fd@Base 1.1.1
  tracefs_tracers@Base 0.0~git20201211.ca6a929
  tracefs_tracing_dir@Base 0.0~git20201221.74d7273
- warning@Base 0.0~git20201211.ca6a929
+ tracefs_vprintf@Base 1.1.1
+ tracefs_warning@Base 1.1.1
+#MISSING: 1.1.1-1# warning@Base 0.0~git20201211.ca6a929
