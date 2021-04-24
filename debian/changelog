@@ -1,3 +1,11 @@
+libtracefs (1.1.1-1) experimental; urgency=medium
+
+  * New upstream version 1.1.1
+    - Update copyright.
+    - Update symbols file.
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Sat, 24 Apr 2021 11:31:50 +0100
+
 libtracefs (1.0.2-1) unstable; urgency=medium
 
   * New upstream version 1.0.2
