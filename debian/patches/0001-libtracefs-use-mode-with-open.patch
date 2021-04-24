@@ -1,0 +1,41 @@
+From 0055c9e869ec0cea85658296043cf89aa78108e7 Mon Sep 17 00:00:00 2001
+From: Sudip Mukherjee <sudipm.mukherjee@gmail.com>
+Date: Fri, 23 Apr 2021 23:48:41 +0100
+Subject: [PATCH] libtracefs: use mode with open()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If -D_FORTIFY_SOURCE=2 is mentioned as a buildflag then the build fails
+with the error:
+In function ‘open’,
+    inlined from ‘copy_trace_file’ at tracefs-utest.c:1032:10:
+error: call to ‘__open_missing_mode’ declared with attribute error:
+  open with O_CREAT or O_TMPFILE in second argument needs 3 arguments
+
+Mention the permission with open() when O_CREAT is mentioned.
+
+Signed-off-by: Sudip Mukherjee <sudipm.mukherjee@gmail.com>
+---
+
+Forwarded: https://lore.kernel.org/linux-trace-devel/20210423232648.1197063-1-sudipm.mukherjee@gmail.com/T/#u
+
+ utest/tracefs-utest.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/utest/tracefs-utest.c b/utest/tracefs-utest.c
+index edb3a3d..0965363 100644
+--- a/utest/tracefs-utest.c
++++ b/utest/tracefs-utest.c
+@@ -1061,7 +1061,7 @@ static void copy_trace_file(const char *from, char *to)
+ 	fd_from = open(from, O_RDONLY);
+ 	if (fd_from < 0)
+ 		goto out;
+-	fd_to = open(to, O_WRONLY | O_TRUNC | O_CREAT);
++	fd_to = open(to, O_WRONLY | O_TRUNC | O_CREAT, S_IRWXU | S_IRWXG);
+ 	if (fd_to < 0)
+ 		goto out;
+ 
+-- 
+2.30.2
+
