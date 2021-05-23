@@ -33,6 +33,10 @@ tracefs_instance_get_file(struct tracefs_instance *instance, const char *file);
 char *tracefs_instance_get_dir(struct tracefs_instance *instance);
 int tracefs_instance_file_write(struct tracefs_instance *instance,
 				const char *file, const char *str);
+int tracefs_instance_file_append(struct tracefs_instance *instance,
+				 const char *file, const char *str);
+int tracefs_instance_file_clear(struct tracefs_instance *instance,
+				const char *file);
 char *tracefs_instance_file_read(struct tracefs_instance *instance,
 				 const char *file, int *psize);
 int tracefs_instance_file_read_number(struct tracefs_instance *instance,
@@ -50,6 +54,9 @@ int tracefs_trace_on(struct tracefs_instance *instance);
 int tracefs_trace_off(struct tracefs_instance *instance);
 int tracefs_trace_on_fd(int fd);
 int tracefs_trace_off_fd(int fd);
+
+int tracefs_event_enable(struct tracefs_instance *instance, const char *system, const char *event);
+int tracefs_event_disable(struct tracefs_instance *instance, const char *system, const char *event);
 
 /**
  * tracefs_trace_on_get_fd - Get a file descriptor of "tracing_on" in given instance
@@ -172,5 +179,9 @@ int tracefs_function_filter(struct tracefs_instance *instance, const char *filte
 			    const char *module, unsigned int flags);
 int tracefs_function_notrace(struct tracefs_instance *instance, const char *filter,
 			     const char *module, unsigned int flags);
+
+
+/* Control library logs */
+void tracefs_set_loglevel(enum tep_loglevel level);
 
 #endif /* _TRACE_FS_H */
