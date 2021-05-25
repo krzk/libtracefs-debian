@@ -1,3 +1,12 @@
+libtracefs (1.2.0-1) experimental; urgency=medium
+
+  * New upstream version 1.2.0
+    - Remove upstream applied patch.
+    - Update version dependency of libtraceevent.
+    - Update symbols.
+
+ -- Sudip Mukherjee <sudipm.mukherjee@gmail.com>  Tue, 25 May 2021 21:21:49 +0100
+
 libtracefs (1.1.1-2) experimental; urgency=medium
 
   * Add version dependency on libtraceevent.
