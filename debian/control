@@ -2,7 +2,7 @@ Source: libtracefs
 Priority: optional
 Maintainer: Sudip Mukherjee <sudipm.mukherjee@gmail.com>
 Build-Depends:
- debhelper-compat (= 13), libcunit1-dev, libtraceevent-dev (>= 1:1.2.1),
+ debhelper-compat (= 13), libcunit1-dev, libtraceevent-dev (>= 1:1.3.0),
  pkg-config, asciidoc, xmlto, source-highlight
 Standards-Version: 4.5.1
 Section: libs
