@@ -7,6 +7,8 @@ libtracefs.so.1 libtracefs1 #MINVER#
  tracefs_binary_init@Base 1.1.1
  tracefs_binary_write@Base 1.1.1
  tracefs_dir_exists@Base 0.0~git20201211.ca6a929
+ tracefs_event_disable@Base 1.2.0
+ tracefs_event_enable@Base 1.2.0
  tracefs_event_systems@Base 0.0~git20201211.ca6a929
  tracefs_file_exists@Base 0.0~git20201211.ca6a929
  tracefs_fill_local_events@Base 0.0~git20201211.ca6a929
@@ -18,6 +20,8 @@ libtracefs.so.1 libtracefs1 #MINVER#
  tracefs_instance_create@Base 0.0~git20201211.ca6a929
  tracefs_instance_destroy@Base 0.0~git20201211.ca6a929
  tracefs_instance_exists@Base 0.0~git20201211.ca6a929
+ tracefs_instance_file_append@Base 1.2.0
+ tracefs_instance_file_clear@Base 1.2.0
  tracefs_instance_file_open@Base 1.1.1
  tracefs_instance_file_read@Base 0.0~git20201211.ca6a929
  tracefs_instance_file_read_number@Base 1.1.1
@@ -47,6 +51,7 @@ libtracefs.so.1 libtracefs1 #MINVER#
  tracefs_print_init@Base 1.1.1
  tracefs_printf@Base 1.1.1
  tracefs_put_tracing_file@Base 0.0~git20201211.ca6a929
+ tracefs_set_loglevel@Base 1.2.0
  tracefs_system_events@Base 0.0~git20201211.ca6a929
  tracefs_trace_is_on@Base 1.1.1
  tracefs_trace_off@Base 1.1.1
