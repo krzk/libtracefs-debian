@@ -2,7 +2,7 @@
 # libtracefs version
 TFS_VERSION = 1
 TFS_PATCHLEVEL = 2
-TFS_EXTRAVERSION = 0
+TFS_EXTRAVERSION = 5
 TRACEFS_VERSION = $(TFS_VERSION).$(TFS_PATCHLEVEL).$(TFS_EXTRAVERSION)
 
 export TFS_VERSION
@@ -182,11 +182,28 @@ libtracefs.so: $(LIBTRACEFS_SHARED)
 
 libs: libtracefs.a libtracefs.so
 
+VALGRIND = $(shell which valgrind)
+UTEST_DIR = utest
+UTEST_BINARY = trace-utest
+
 test: force $(LIBTRACEFS_STATIC)
 ifneq ($(CUNIT_INSTALLED),1)
 	$(error CUnit framework not installed, cannot build unit tests))
 endif
-	$(Q)$(MAKE) -C $(src)/utest $@
+	$(Q)$(MAKE) -C $(src)/$(UTEST_DIR) $@
+
+test_mem: test
+ifeq (, $(VALGRIND))
+	$(error "No valgrind in $(PATH), cannot run memory test")
+endif
+ifneq ($(shell id -u), 0)
+	$(error "The unit test should be run as root, as it reuqires full access to tracefs")
+endif
+	CK_FORK=no LD_LIBRARY_PATH=$(bdir) $(VALGRIND) \
+		--show-leak-kinds=all --leak-resolution=high \
+		--leak-check=full --show-possibly-lost=yes \
+		--track-origins=yes -s \
+		$(src)/$(UTEST_DIR)/$(UTEST_BINARY)
 
 define find_tag_files
 	find . -name '\.pc' -prune -o -name '*\.[ch]' -print -o -name '*\.[ch]pp' \
@@ -198,7 +215,8 @@ define do_make_pkgconfig_file
 	sed -i "s|INSTALL_PREFIX|${1}|g" ${PKG_CONFIG_FILE}; 		\
 	sed -i "s|LIB_VERSION|${TRACEFS_VERSION}|g" ${PKG_CONFIG_FILE}; \
 	sed -i "s|LIB_DIR|${libdir_relative}|g" ${PKG_CONFIG_FILE}; \
-	sed -i "s|HEADER_DIR|$(includedir_relative)|g" ${PKG_CONFIG_FILE};
+	sed -i "s|HEADER_DIR|$(includedir_relative)|g" ${PKG_CONFIG_FILE}; \
+	sed -i "s|LIBTRACEEVENT_MIN|$(LIBTRACEEVENT_MIN_VERSION)|g" ${PKG_CONFIG_FILE};
 endef
 
 BUILD_PREFIX := $(BUILD_OUTPUT)/build_prefix
