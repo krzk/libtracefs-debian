@@ -38,7 +38,8 @@ libtracefs.so.1 libtracefs1 #MINVER#
  tracefs_load_cmdlines@Base 1.1.1
  tracefs_local_events@Base 0.0~git20201211.ca6a929
  tracefs_local_events_system@Base 0.0~git20201211.ca6a929
- tracefs_option_diasble@Base 1.1.1
+#MISSING: 1.2.5-1# tracefs_option_diasble@Base 1.1.1
+ tracefs_option_disable@Base 1.2.5
  tracefs_option_enable@Base 1.1.1
  tracefs_option_id@Base 1.1.1
  tracefs_option_is_enabled@Base 1.1.1
