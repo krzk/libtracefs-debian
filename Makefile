@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1
 # libtracefs version
 TFS_VERSION = 1
-TFS_PATCHLEVEL = 2
-TFS_EXTRAVERSION = 5
+TFS_PATCHLEVEL = 3
+TFS_EXTRAVERSION = dev
 TRACEFS_VERSION = $(TFS_VERSION).$(TFS_PATCHLEVEL).$(TFS_EXTRAVERSION)
 
 export TFS_VERSION
@@ -52,8 +52,6 @@ endif
 
 libdir_relative ?= $(libdir_relative_temp)
 prefix ?= /usr/local
-bindir_relative = bin
-bindir = $(prefix)/$(bindir_relative)
 man_dir = $(prefix)/share/man
 man_dir_SQ = '$(subst ','\'',$(man_dir))'
 libdir = $(prefix)/$(libdir_relative)
@@ -82,10 +80,6 @@ export man_dir man_dir_SQ html_install html_install_SQ INSTALL
 export img_install img_install_SQ
 export DESTDIR DESTDIR_SQ
 
-# Shell quotes
-bindir_SQ = $(subst ','\'',$(bindir))
-bindir_relative_SQ = $(subst ','\'',$(bindir_relative))
-
 pound := \#
 
 HELP_DIR = -DHELP_DIR=$(html_install)
@@ -110,9 +104,6 @@ SILENT := $(if $(findstring s,$(filter-out --%,$(MAKEFLAGS))),1)
 test-build = $(if $(shell sh -c 'echo "$(1)" | \
 	$(CC) -o /dev/null -c -x c - > /dev/null 2>&1 && echo y'), $2)
 
-# have flush/fua block layer instead of barriers?
-blk-flags := $(call test-build,$(BLK_TC_FLUSH_SOURCE),-DHAVE_BLK_TC_FLUSH)
-
 ifeq ("$(origin O)", "command line")
 
   saved-output := $(O)
@@ -128,12 +119,15 @@ srctree		:= $(if $(BUILD_SRC),$(BUILD_SRC),$(CURDIR))
 objtree		:= $(BUILD_OUTPUT)
 src		:= $(srctree)
 obj		:= $(objtree)
-bdir		:= $(obj)/lib/tracefs
+bdir		:= $(obj)/lib
 
-export prefix bindir src obj bdir
+export prefix src obj bdir
 
 LIBTRACEFS_STATIC = $(bdir)/libtracefs.a
 LIBTRACEFS_SHARED = $(bdir)/libtracefs.so.$(TRACEFS_VERSION)
+
+LIBTRACEFS_SHARED_SO = $(bdir)/libtracefs.so
+LIBTRACEFS_SHARED_VERSION = $(bdir)/libtracefs.so.$(TFS_VERSION)
 
 PKG_CONFIG_SOURCE_FILE = libtracefs.pc
 PKG_CONFIG_FILE := $(addprefix $(obj)/,$(PKG_CONFIG_SOURCE_FILE))
@@ -142,6 +136,8 @@ LIBS = $(LIBTRACEEVENT_LIBS) -lpthread
 
 export LIBS
 export LIBTRACEFS_STATIC LIBTRACEFS_SHARED
+export LIBTRACEEVENT_LIBS LIBTRACEEVENT_INCLUDES
+export LIBTRACEFS_SHARED_SO LIBTRACEFS_SHARED_VERSION
 
 export Q SILENT VERBOSE EXT
 
@@ -173,12 +169,12 @@ LIB_TARGET  = libtracefs.a libtracefs.so.$(TRACEFS_VERSION)
 LIB_INSTALL = libtracefs.a libtracefs.so*
 LIB_INSTALL := $(addprefix $(bdir)/,$(LIB_INSTALL))
 
-TARGETS = $(LIBTRACEFS_SHARED) $(LIBTRACEFS_STATIC)
+TARGETS = libtracefs.so libtracefs.a
 
 all_cmd: $(TARGETS) $(PKG_CONFIG_FILE)
 
-libtracefs.a: $(LIBTRACEFS_STATIC)
-libtracefs.so: $(LIBTRACEFS_SHARED)
+libtracefs.a: $(bdir) $(LIBTRACEFS_STATIC)
+libtracefs.so: $(bdir) $(LIBTRACEFS_SHARED)
 
 libs: libtracefs.a libtracefs.so
 
@@ -190,7 +186,7 @@ test: force $(LIBTRACEFS_STATIC)
 ifneq ($(CUNIT_INSTALLED),1)
 	$(error CUnit framework not installed, cannot build unit tests))
 endif
-	$(Q)$(MAKE) -C $(src)/$(UTEST_DIR) $@
+	$(Q)$(call descend,$(src)/$(UTEST_DIR),$@)
 
 test_mem: test
 ifeq (, $(VALGRIND))
@@ -206,7 +202,7 @@ endif
 		$(src)/$(UTEST_DIR)/$(UTEST_BINARY)
 
 define find_tag_files
-	find . -name '\.pc' -prune -o -name '*\.[ch]' -print -o -name '*\.[ch]pp' \
+	find $(src) -name '\.pc' -prune -o -name '*\.[ch]' -print -o -name '*\.[ch]pp' \
 		! -name '\.#' -print
 endef
 
@@ -229,17 +225,25 @@ $(BUILD_PREFIX): force
 $(PKG_CONFIG_FILE) : ${PKG_CONFIG_SOURCE_FILE}.template $(BUILD_PREFIX) $(VERSION_FILE)
 	$(Q) $(call do_make_pkgconfig_file,$(prefix))
 
-tags:	force
-	$(RM) tags
-	$(call find_tag_files) | xargs ctags --extra=+f --c-kinds=+px
+VIM_TAGS = $(obj)/tags
+EMACS_TAGS = $(obj)/TAGS
+CSCOPE_TAGS = $(obj)/cscope
 
-TAGS:	force
-	$(RM) TAGS
-	$(call find_tag_files) | xargs etags
+$(VIM_TAGS): force
+	$(RM) $@
+	$(call find_tag_files) | (cd $(obj) && xargs ctags --extra=+f --c-kinds=+px)
 
-cscope: force
-	$(RM) cscope*
+$(EMACS_TAGS): force
+	$(RM) $@
+	$(call find_tag_files) | (cd $(obj) && xargs etags)
+
+$(CSCOPE_TAGS): force
+	$(RM) $(obj)/cscope*
 	$(call find_tag_files) | cscope -b -q
+
+tags: $(VIM_TAGS)
+TAGS: $(EMACS_TAGS)
+cscope: $(CSCOPE_TAGS)
 
 ifeq ("$(DESTDIR)", "")
 # If DESTDIR is not defined, then test if after installing the library
@@ -279,13 +283,13 @@ install_pkgconfig: $(PKG_CONFIG_FILE)
 		$(call do_install_pkgconfig_file,$(prefix))
 
 doc:
-	$(MAKE) -C $(src)/Documentation all
+	$(Q)$(call descend,$(src)/Documentation,all)
 
 doc_clean:
-	$(MAKE) -C $(src)/Documentation clean
+	$(Q)$(call descend,$(src)/Documentation,clean)
 
 install_doc:
-	$(MAKE) -C $(src)/Documentation install
+	$(Q)$(call descend,$(src)/Documentation,install)
 
 define build_uninstall_script
 	$(Q)mkdir $(BUILD_OUTPUT)/tmp_build
@@ -357,18 +361,27 @@ $(VERSION_FILE): force
 	$(Q)$(call update_version.h)
 
 $(LIBTRACEFS_STATIC): force
-	$(Q)mkdir -p $(bdir)
-	$(Q)$(MAKE) -C $(src)/src $@
+	$(Q)$(call descend,$(src)/src,$@)
 
 $(bdir)/libtracefs.so.$(TRACEFS_VERSION): force
-	$(Q)mkdir -p $(bdir)
-	$(Q)$(MAKE) -C $(src)/src libtracefs.so
+	$(Q)$(call descend,$(src)/src,libtracefs.so)
+
+samples/sqlhist: libtracefs.a
+	$(Q)$(call descend,$(src)/samples,sqlhist)
+
+sqlhist: samples/sqlhist
+
+samples: libtracefs.a force
+	$(Q)$(call descend,$(src)/samples,all)
 
 clean:
-	$(MAKE) -C $(src)/utest clean
-	$(MAKE) -C $(src)/src clean
-	$(RM) $(TARGETS) $(bdir)/*.a $(bdir)/*.so $(bdir)/*.so.* $(bdir)/*.o $(bdir)/.*.d
-	$(RM) $(PKG_CONFIG_FILE)
-	$(RM) $(VERSION_FILE)
+	$(Q)$(call descend_clean,utest)
+	$(Q)$(call descend_clean,src)
+	$(Q)$(call descend_clean,samples)
+	$(Q)$(call do_clean, \
+	  $(TARGETS) $(bdir)/*.a $(bdir)/*.so $(bdir)/*.so.* $(bdir)/*.o $(bdir)/.*.d \
+	  $(PKG_CONFIG_FILE) \
+	  $(VERSION_FILE) \
+	  $(BUILD_PREFIX))
 
 .PHONY: clean

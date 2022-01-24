@@ -109,7 +109,8 @@ static int read_cpu_pages(struct tep_handle *tep, struct cpu_iterate *cpus, int 
 			  int (*callback)(struct tep_event *,
 					  struct tep_record *,
 					  int, void *),
-			  void *callback_context)
+			  void *callback_context,
+			  bool *keep_going)
 {
 	bool has_data = false;
 	int ret;
@@ -121,7 +122,7 @@ static int read_cpu_pages(struct tep_handle *tep, struct cpu_iterate *cpus, int 
 			has_data = true;
 	}
 
-	while (has_data) {
+	while (has_data && *(volatile bool *)keep_going) {
 		j = count;
 		for (i = 0; i < count; i++) {
 			if (!cpus[i].event)
@@ -205,6 +206,8 @@ out:
 	return ret;
 }
 
+static bool top_iterate_keep_going;
+
 /*
  * tracefs_iterate_raw_events - Iterate through events in trace_pipe_raw,
  *				per CPU trace buffers
@@ -230,10 +233,14 @@ int tracefs_iterate_raw_events(struct tep_handle *tep,
 						int, void *),
 				void *callback_context)
 {
+	bool *keep_going = instance ? &instance->pipe_keep_going :
+				      &top_iterate_keep_going;
 	struct cpu_iterate *all_cpus = NULL;
 	int count = 0;
 	int ret;
 	int i;
+
+	(*(volatile bool *)keep_going) = true;
 
 	if (!tep || !callback)
 		return -1;
@@ -241,7 +248,9 @@ int tracefs_iterate_raw_events(struct tep_handle *tep,
 	ret = open_cpu_files(instance, cpus, cpu_size, &all_cpus, &count);
 	if (ret < 0)
 		goto out;
-	ret = read_cpu_pages(tep, all_cpus, count, callback, callback_context);
+	ret = read_cpu_pages(tep, all_cpus, count,
+			     callback, callback_context,
+			     keep_going);
 
 out:
 	if (all_cpus) {
@@ -256,22 +265,31 @@ out:
 	return ret;
 }
 
-static char **add_list_string(char **list, const char *name, int len)
+/**
+ * tracefs_iterate_stop - stop the iteration over the raw events.
+ * @instance: ftrace instance, can be NULL for top tracing instance.
+ */
+void tracefs_iterate_stop(struct tracefs_instance *instance)
 {
-	if (!list)
-		list = malloc(sizeof(*list) * 2);
+	if (instance)
+		instance->iterate_keep_going = false;
 	else
-		list = realloc(list, sizeof(*list) * (len + 2));
-	if (!list)
-		return NULL;
+		top_iterate_keep_going = false;
+}
 
-	list[len] = strdup(name);
-	if (!list[len])
-		return NULL;
+static int add_list_string(char ***list, const char *name)
+{
+	char **tmp;
 
-	list[len + 1] = NULL;
+	tmp = tracefs_list_add(*list, name);
+	if (!tmp) {
+		tracefs_list_free(*list);
+		*list = NULL;
+		return -1;
+	}
 
-	return list;
+	*list = tmp;
+	return 0;
 }
 
 __hidden char *trace_append_file(const char *dir, const char *name)
@@ -284,24 +302,186 @@ __hidden char *trace_append_file(const char *dir, const char *name)
 	return ret < 0 ? NULL : file;
 }
 
-/**
- * tracefs_list_free - free list if strings, returned by APIs
- *			tracefs_event_systems()
- *			tracefs_system_events()
- *
- *@list pointer to a list of strings, the last one must be NULL
- */
-void tracefs_list_free(char **list)
+static int event_file(char **path, const char *system,
+		      const char *event, const char *file)
 {
-	int i;
+	if (!system || !event || !file)
+		return -1;
 
-	if (!list)
-		return;
+	return asprintf(path, "events/%s/%s/%s",
+			system, event, file);
+}
 
-	for (i = 0; list[i]; i++)
-		free(list[i]);
+/**
+ * tracefs_event_get_file - return a file in an event directory
+ * @instance: The instance the event is in (NULL for top level)
+ * @system: The system name that the event file is in
+ * @event: The event name of the event
+ * @file: The name of the file in the event directory.
+ *
+ * Returns a path to a file in the event director.
+ * or NULL on error. The path returned must be freed with
+ * tracefs_put_tracing_file().
+ */
+char *tracefs_event_get_file(struct tracefs_instance *instance,
+			     const char *system, const char *event,
+			     const char *file)
+{
+	char *instance_path;
+	char *path;
+	int ret;
 
-	free(list);
+	ret = event_file(&path, system, event, file);
+	if (ret < 0)
+		return NULL;
+
+	instance_path = tracefs_instance_get_file(instance, path);
+	free(path);
+
+	return instance_path;
+}
+
+/**
+ * tracefs_event_file_read - read the content from an event file
+ * @instance: The instance the event is in (NULL for top level)
+ * @system: The system name that the event file is in
+ * @event: The event name of the event
+ * @file: The name of the file in the event directory.
+ * @psize: the size of the content read.
+ *
+ * Reads the content of the event file that is passed via the
+ * arguments and returns the content.
+ *
+ * Return a string containing the content of the file or NULL
+ * on error. The string returned must be freed with free().
+ */
+char *tracefs_event_file_read(struct tracefs_instance *instance,
+			      const char *system, const char *event,
+			      const char *file, int *psize)
+{
+	char *content;
+	char *path;
+	int ret;
+
+	ret = event_file(&path, system, event, file);
+	if (ret < 0)
+		return NULL;
+
+	content = tracefs_instance_file_read(instance, path, psize);
+	free(path);
+	return content;
+}
+
+/**
+ * tracefs_event_file_write - write to an event file
+ * @instance: The instance the event is in (NULL for top level)
+ * @system: The system name that the event file is in
+ * @event: The event name of the event
+ * @file: The name of the file in the event directory.
+ * @str: The string to write into the file
+ *
+ * Writes the content of @str to a file in the instance directory.
+ * The content of the file will be overwritten by @str.
+ *
+ * Return 0 on success, and -1 on error.
+ */
+int tracefs_event_file_write(struct tracefs_instance *instance,
+			     const char *system, const char *event,
+			     const char *file, const char *str)
+{
+	char *path;
+	int ret;
+
+	ret = event_file(&path, system, event, file);
+	if (ret < 0)
+		return -1;
+
+	ret = tracefs_instance_file_write(instance, path, str);
+	free(path);
+	return ret;
+}
+
+/**
+ * tracefs_event_file_append - write to an event file
+ * @instance: The instance the event is in (NULL for top level)
+ * @system: The system name that the event file is in
+ * @event: The event name of the event
+ * @file: The name of the file in the event directory.
+ * @str: The string to write into the file
+ *
+ * Writes the content of @str to a file in the instance directory.
+ * The content of @str will be appended to the content of the file.
+ * The current content should not be lost.
+ *
+ * Return 0 on success, and -1 on error.
+ */
+int tracefs_event_file_append(struct tracefs_instance *instance,
+			      const char *system, const char *event,
+			      const char *file, const char *str)
+{
+	char *path;
+	int ret;
+
+	ret = event_file(&path, system, event, file);
+	if (ret < 0)
+		return -1;
+
+	ret = tracefs_instance_file_append(instance, path, str);
+	free(path);
+	return ret;
+}
+
+/**
+ * tracefs_event_file_clear - clear an event file
+ * @instance: The instance the event is in (NULL for top level)
+ * @system: The system name that the event file is in
+ * @event: The event name of the event
+ * @file: The name of the file in the event directory.
+ *
+ * Clears the content of the event file. That is, it is opened
+ * with O_TRUNC and then closed.
+ *
+ * Return 0 on success, and -1 on error.
+ */
+int tracefs_event_file_clear(struct tracefs_instance *instance,
+			     const char *system, const char *event,
+			     const char *file)
+{
+	char *path;
+	int ret;
+
+	ret = event_file(&path, system, event, file);
+	if (ret < 0)
+		return -1;
+
+	ret = tracefs_instance_file_clear(instance, path);
+	free(path);
+	return ret;
+}
+
+/**
+ * tracefs_event_file_exits - test if a file exists
+ * @instance: The instance the event is in (NULL for top level)
+ * @system: The system name that the event file is in
+ * @event: The event name of the event
+ * @file: The name of the file in the event directory.
+ *
+ * Return true if the file exists, false if it odes not or
+ * an error occurred.
+ */
+bool tracefs_event_file_exists(struct tracefs_instance *instance,
+			       const char *system, const char *event,
+			       const char *file)
+{
+	char *path;
+	bool ret;
+
+	if (event_file(&path, system, event, file) < 0)
+		return false;
+
+	ret = tracefs_file_exists(instance, path);
+	free(path);
+	return ret;
 }
 
 /**
@@ -320,7 +500,6 @@ char **tracefs_event_systems(const char *tracing_dir)
 	char *events_dir;
 	struct stat st;
 	DIR *dir;
-	int len = 0;
 	int ret;
 
 	if (!tracing_dir)
@@ -364,9 +543,10 @@ char **tracefs_event_systems(const char *tracing_dir)
 		enable = trace_append_file(sys, "enable");
 
 		ret = stat(enable, &st);
-		if (ret >= 0)
-			systems = add_list_string(systems, name, len++);
-
+		if (ret >= 0) {
+			if (add_list_string(&systems, name) < 0)
+				goto out_free;
+		}
 		free(enable);
 		free(sys);
 	}
@@ -394,7 +574,6 @@ char **tracefs_system_events(const char *tracing_dir, const char *system)
 	char *system_dir = NULL;
 	struct stat st;
 	DIR *dir;
-	int len = 0;
 	int ret;
 
 	if (!tracing_dir)
@@ -430,7 +609,8 @@ char **tracefs_system_events(const char *tracing_dir, const char *system)
 			continue;
 		}
 
-		events = add_list_string(events, name, len++);
+		if (add_list_string(&events, name) < 0)
+			goto out_free;
 
 		free(event);
 	}
@@ -448,7 +628,7 @@ char **tracefs_system_events(const char *tracing_dir, const char *system)
  * @tracing_dir: The directory that contains the tracing directory
  *
  * Returns an allocate list of plugins. The array ends with NULL
- * Both the plugin names and array must be freed with free()
+ * Both the plugin names and array must be freed with tracefs_list_free()
  */
 char **tracefs_tracers(const char *tracing_dir)
 {
@@ -480,7 +660,6 @@ char **tracefs_tracers(const char *tracing_dir)
 	if (len <= 0)
 		goto out_free;
 
-	len = 0;
 	for (str = buf; ; str = NULL) {
 		plugin = strtok_r(str, " ", &saveptr);
 		if (!plugin)
@@ -498,7 +677,8 @@ char **tracefs_tracers(const char *tracing_dir)
 		    strcmp(plugin, "none") == 0)
 			continue;
 
-		plugins = add_list_string(plugins, plugin, len++);
+		if (add_list_string(&plugins, plugin) < 0)
+			break;
 	}
 	free(buf);
 
@@ -509,13 +689,16 @@ char **tracefs_tracers(const char *tracing_dir)
 }
 
 static int load_events(struct tep_handle *tep,
-		       const char *tracing_dir, const char *system)
+		       const char *tracing_dir, const char *system, bool check)
 {
 	int ret = 0, failure = 0;
 	char **events = NULL;
 	struct stat st;
 	int len = 0;
 	int i;
+
+	if (!tracing_dir)
+		tracing_dir = tracefs_tracing_dir();
 
 	events = tracefs_system_events(tracing_dir, system);
 	if (!events)
@@ -536,6 +719,10 @@ static int load_events(struct tep_handle *tep,
 		if (ret < 0)
 			goto next_event;
 
+		/* check if event is already added, to avoid duplicates */
+		if (check && tep_find_event_by_name(tep, system, events[i]))
+			goto next_event;
+
 		len = str_read_file(format, &buf, true);
 		if (len <= 0)
 			goto next_event;
@@ -550,6 +737,40 @@ next_event:
 
 	tracefs_list_free(events);
 	return failure;
+}
+
+__hidden int trace_rescan_events(struct tep_handle *tep,
+				const char *tracing_dir, const char *system)
+{
+	/* ToDo: add here logic for deleting removed events from tep handle */
+	return load_events(tep, tracing_dir, system, true);
+}
+
+__hidden int trace_load_events(struct tep_handle *tep,
+			       const char *tracing_dir, const char *system)
+{
+	return load_events(tep, tracing_dir, system, false);
+}
+
+__hidden struct tep_event *get_tep_event(struct tep_handle *tep,
+					 const char *system, const char *name)
+{
+	struct tep_event *event;
+
+	/* Check if event exists in the system */
+	if (!tracefs_event_file_exists(NULL, system, name, "format"))
+		return NULL;
+
+	/* If the event is already loaded in the tep, return it */
+	event = tep_find_event_by_name(tep, system, name);
+	if (event)
+		return event;
+
+	/* Try to load any new events from the given system */
+	if (trace_rescan_events(tep, NULL, system))
+		return NULL;
+
+	return tep_find_event_by_name(tep, system, name);
 }
 
 static int read_header(struct tep_handle *tep, const char *tracing_dir)
@@ -706,14 +927,14 @@ static int fill_local_events_system(const char *tracing_dir,
 	for (i = 0; systems[i]; i++) {
 		if (sys_names && !contains(systems[i], sys_names))
 			continue;
-		ret = load_events(tep, tracing_dir, systems[i]);
+		ret = trace_load_events(tep, tracing_dir, systems[i]);
 		if (ret && parsing_failures)
 			(*parsing_failures)++;
 	}
 
 	/* Include ftrace, as it is excluded for not having "enable" file */
 	if (!sys_names || contains("ftrace", sys_names))
-		load_events(tep, tracing_dir, "ftrace");
+		trace_load_events(tep, tracing_dir, "ftrace");
 
 	load_mappings(tracing_dir, tep);
 
@@ -868,7 +1089,6 @@ static int event_enable_disable(struct tracefs_instance *instance,
 
 	if (system) {
 		ret = make_regex(&system_re, system);
-		ret = regcomp(&system_re, system, REG_ICASE|REG_NOSUB);
 		if (ret < 0)
 			goto out_free;
 	}

@@ -23,6 +23,8 @@
 #define TRACEFS_PATH "/sys/kernel/tracing"
 #define DEBUGFS_PATH "/sys/kernel/debug"
 
+#define ERROR_LOG "error_log"
+
 #define _STR(x) #x
 #define STR(x) _STR(x)
 
@@ -252,4 +254,238 @@ __hidden int str_read_file(const char *file, char **buffer, bool warn)
 		free(buf);
 
 	return size;
+}
+
+/**
+ * tracefs_error_all - return the content of the error log
+ * @instance: The instance to read the error log from (NULL for top level)
+ *
+ * Return NULL if the log is empty, or on error (where errno will be
+ * set. Otherwise the content of the entire log is returned in a string
+ * that must be freed with free().
+ */
+char *tracefs_error_all(struct tracefs_instance *instance)
+{
+	char *content;
+	char *path;
+	int size;
+
+	errno = 0;
+
+	path = tracefs_instance_get_file(instance, ERROR_LOG);
+	if (!path)
+		return NULL;
+	size = str_read_file(path, &content, false);
+	tracefs_put_tracing_file(path);
+
+	if (size <= 0)
+		return NULL;
+
+	return content;
+}
+
+enum line_states {
+	START,
+	CARROT,
+};
+
+/**
+ * tracefs_error_last - return the last error logged
+ * @instance: The instance to read the error log from (NULL for top level)
+ *
+ * Return NULL if the log is empty, or on error (where errno will be
+ * set. Otherwise a string containing the content of the last error shown
+* in the log that must be freed with free().
+ */
+char *tracefs_error_last(struct tracefs_instance *instance)
+{
+	enum line_states state = START;
+	char *content;
+	char *ret;
+	bool done = false;
+	int size;
+	int i;
+
+	content = tracefs_error_all(instance);
+	if (!content)
+		return NULL;
+
+	size = strlen(content);
+	if (!size) /* Should never happen */
+		return content;
+
+	for (i = size - 1; i > 0; i--) {
+		switch (state) {
+		case START:
+			if (content[i] == '\n') {
+				/* Remove extra new lines */
+				content[i] = '\0';
+				break;
+			}
+			if (content[i] == '^')
+				state = CARROT;
+			break;
+		case CARROT:
+			if (content[i] == '\n') {
+				/* Remember last new line */
+				size = i;
+				break;
+			}
+			if (content[i] == '^') {
+				/* Go just passed the last newline */
+				i = size + 1;
+				done = true;
+			}
+			break;
+		}
+		if (done)
+			break;
+	}
+
+	if (i) {
+		ret = strdup(content + i);
+		free(content);
+	} else {
+		ret = content;
+	}
+
+	return ret;
+}
+
+/**
+ * tracefs_error_clear - clear the error log of an instance
+ * @instance: The instance to clear (NULL for top level)
+ *
+ * Clear the content of the error log.
+ *
+ * Returns 0 on success, -1 otherwise.
+ */
+int tracefs_error_clear(struct tracefs_instance *instance)
+{
+	return tracefs_instance_file_clear(instance, ERROR_LOG);
+}
+
+/**
+ * tracefs_list_free - free list if strings, returned by APIs
+ *			tracefs_event_systems()
+ *			tracefs_system_events()
+ *
+ *@list pointer to a list of strings, the last one must be NULL
+ */
+void tracefs_list_free(char **list)
+{
+	int i;
+
+	if (!list)
+		return;
+
+	for (i = 0; list[i]; i++)
+		free(list[i]);
+
+	/* The allocated list is before the user visible portion */
+	list--;
+	free(list);
+}
+
+
+__hidden char ** trace_list_create_empty(void)
+{
+	char **list;
+
+	list = calloc(2, sizeof(*list));
+
+	return list ? &list[1] : NULL;
+}
+
+/**
+ * tracefs_list_add - create or extend a string list
+ * @list: The list to add to (NULL to create a new one)
+ * @string: The string to append to @list.
+ *
+ * If @list is NULL, a new list is created with the first element
+ * a copy of @string, and the second element is NULL.
+ *
+ * If @list is not NULL, it is then reallocated to include
+ * a new element and a NULL terminator, and will return the new
+ * allocated array on success, and the one passed in should be
+ * ignored.
+ *
+ * Returns an allocated string array that must be freed with
+ * tracefs_list_free() on success. On failure, NULL is returned
+ * and the @list is untouched.
+ */
+char **tracefs_list_add(char **list, const char *string)
+{
+	unsigned long size = 0;
+	char *str = strdup(string);
+	char **new_list;
+
+	if (!str)
+		return NULL;
+
+	/*
+	 * The returned list is really the address of the
+	 * second entry of the list (&list[1]), the first
+	 * entry contains the number of strings in the list.
+	 */
+	if (list) {
+		list--;
+		size = *(unsigned long *)list;
+	}
+
+	new_list = realloc(list, sizeof(*list) * (size + 3));
+	if (!new_list) {
+		free(str);
+		return NULL;
+	}
+
+	list = new_list;
+	list[0] = (char *)(size + 1);
+	list++;
+	list[size++] = str;
+	list[size] = NULL;
+
+	return list;
+}
+
+/**
+ * tracefs_list_pop - Removes the last string added
+ * @list: The list to remove the last event from
+ *
+ * Returns 0 on success, -1 on error.
+ * Returns 1 if the list is empty or NULL.
+ */
+int tracefs_list_pop(char **list)
+{
+	unsigned long size;
+
+	if (!list || list[0])
+		return 1;
+
+	list--;
+	size = *(unsigned long *)list;
+	/* size must be greater than zero */
+	if (!size)
+		return -1;
+	size--;
+	*list = (char *)size;
+	list++;
+	list[size] = NULL;
+	return 0;
+}
+
+/**
+ * tracefs_list_size - Return the number of strings in the list
+ * @list: The list to determine the size.
+ *
+ * Returns the number of elements in the list.
+ * If @list is NULL, then zero is returned.
+ */
+int tracefs_list_size(char **list)
+{
+	if (!list)
+		return 0;
+
+	list--;
+	return (int)*(unsigned long *)list;
 }

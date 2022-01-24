@@ -25,11 +25,14 @@ struct tracefs_instance {
 	char				*trace_dir;
 	char				*name;
 	pthread_mutex_t			lock;
+	int				ref;
 	int				flags;
 	int				ftrace_filter_fd;
 	int				ftrace_notrace_fd;
 	int				ftrace_marker_fd;
 	int				ftrace_marker_raw_fd;
+	bool				pipe_keep_going;
+	bool				iterate_keep_going;
 };
 
 extern pthread_mutex_t toplevel_lock;
@@ -38,6 +41,9 @@ static inline pthread_mutex_t *trace_get_lock(struct tracefs_instance *instance)
 {
 	return instance ? &instance->lock : &toplevel_lock;
 }
+
+void trace_put_instance(struct tracefs_instance *instance);
+int trace_get_instance(struct tracefs_instance *instance);
 
 /* Can be overridden */
 void tracefs_warning(const char *fmt, ...);
@@ -63,5 +69,54 @@ supported_opts_mask(struct tracefs_instance *instance);
 
 struct tracefs_options_mask *
 enabled_opts_mask(struct tracefs_instance *instance);
+
+char **trace_list_create_empty(void);
+
+char *append_string(char *str, const char *delim, const char *add);
+int trace_test_state(int state);
+bool trace_verify_event_field(struct tep_event *event,
+			      const char *field_name,
+			      const struct tep_format_field **ptr_field);
+int trace_append_filter(char **filter, unsigned int *state,
+			unsigned int *open_parens,
+			struct tep_event *event,
+			enum tracefs_filter type,
+			const char *field_name,
+			enum tracefs_compare compare,
+			 const char *val);
+
+struct tracefs_synth *synth_init_from(struct tep_handle *tep,
+				      const char *start_system,
+				      const char *start_event);
+
+#define HIST_COUNTER_TYPE	(TRACEFS_HIST_KEY_MAX + 100)
+int synth_add_start_field(struct tracefs_synth *synth,
+			  const char *start_field,
+			  const char *name,
+			  enum tracefs_hist_key_type type);
+
+/* Internal interface for ftrace dynamic events */
+
+struct tracefs_dynevent {
+	char *trace_file;
+	char *prefix;
+	char *system;
+	char *event;
+	char *address;
+	char *format;
+	enum tracefs_dynevent_type type;
+};
+
+struct tracefs_dynevent *
+dynevent_alloc(enum tracefs_dynevent_type type, const char *system,
+	       const char *event, const char *address, const char *format);
+int dynevent_get_count(unsigned int types, const char *system);
+
+int trace_load_events(struct tep_handle *tep,
+		      const char *tracing_dir, const char *system);
+int trace_rescan_events(struct tep_handle *tep,
+			const char *tracing_dir, const char *system);
+struct tep_event *get_tep_event(struct tep_handle *tep,
+				const char *system, const char *name);
 
 #endif /* _TRACE_FS_LOCAL_H */
