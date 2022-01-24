@@ -375,6 +375,7 @@ samples: libtracefs.a force
 	$(Q)$(call descend,$(src)/samples,all)
 
 clean:
+	$(Q)$(call descend_clean,Documentation)
 	$(Q)$(call descend_clean,utest)
 	$(Q)$(call descend_clean,src)
 	$(Q)$(call descend_clean,samples)
