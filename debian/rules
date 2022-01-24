@@ -17,6 +17,3 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	dh_auto_install -- install_doc $(build_flags)
-
-execute_before_dh_auto_test:
-	cp lib/tracefs/* utest/.
