@@ -1,3 +1,9 @@
+libtracefs (1.3.0-dev1) jammy; urgency=medium
+
+  * Development snapshot: upstream version 25931213baaa.
+
+ -- Krzysztof Kozlowski <krzysztof.kozlowski@canonical.com>  Mon, 24 Jan 2022 10:26:43 +0100
+
 libtracefs (1.2.5-1) unstable; urgency=medium
 
   * Upload to unstable.
